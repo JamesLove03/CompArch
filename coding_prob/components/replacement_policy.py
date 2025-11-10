@@ -30,6 +30,4 @@ class RepPolicy:
         
         elif self.policy == 1: #FIFO Logic
             
-
-
-        return output
+            return 0
