@@ -1,0 +1,4 @@
+# sample requirements.txt file
+
+# requests==2.26.0
+# numpy==1.21.2
