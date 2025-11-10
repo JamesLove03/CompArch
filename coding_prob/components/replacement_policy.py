@@ -18,7 +18,7 @@ class RepPolicy:
         
 
 
-    def update(self, new):
+    def update(self, new): #update the tracker and returns the block to be written to
         output = None
         if self.policy == 0: #LRU Logic
             if new in self.cache: 

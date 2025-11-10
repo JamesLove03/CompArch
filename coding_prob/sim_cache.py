@@ -3,7 +3,8 @@ from components.cache import Cache
 from components.replacement_policy import RepPolicy
 
 
-def run_test(cache, rep_policy, file):
+def run_test(cache, file):
+
 
 
 
@@ -23,8 +24,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args
 
-    cache = Cache(args.blocksize, args.L1size, args.L1assoc, args.L2size, args.L2assoc, args.Inclusion_Property)
-    rep = RepPolicy(args.Replacement_Policy)
+    cache = Cache(args.blocksize, args.L1size, args.L1assoc, args.L2size, args.L2assoc, args.Inclusion_Property, args.Replacement_Policy)
 
 
-    run_test(cache, rep, trace_file)
+    run_test(cache, args.trace_file)
