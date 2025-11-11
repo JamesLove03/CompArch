@@ -97,3 +97,5 @@ if __name__ == "__main__":
     print(f"{'trace_file:':<22}{args.trace_file}")
 
     run_test(L1cache, args.trace_file)
+    
+    
