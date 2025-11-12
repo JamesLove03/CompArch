@@ -31,7 +31,7 @@ class RepPolicy:
         for i, (block, valid) in enumerate(cache_set):
             if not valid:
                 cache_set[i] = (new, True)
-                return block.rstrip(" I")
+                return block
         
         if self.policy == 0: #LRU Logic
 

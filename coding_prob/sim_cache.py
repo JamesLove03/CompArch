@@ -32,6 +32,7 @@ def run_test(cache, file):
 def print_results(cache):
 
     print("===== Simulation results (raw) =====")
+    cache.miss_rate = round((cache.read_miss +cache.write_miss) / (cache.reads + cache.writes), 6)
     results = {
         "a. number of L1 reads:": cache.reads,
         "b. number of L1 read misses:": cache.read_miss,
@@ -43,6 +44,7 @@ def print_results(cache):
     total_traffic = cache.read_miss + cache.write_miss + cache.writeback
     
     if hasattr(cache, "next"): #if L2 exists append these values and update total_traffic
+        cache.next.miss_rate = round((cache.next.read_miss +cache.next.write_miss) / (cache.next.reads + cache.next.writes), 6)
         results.update({
             "g. number of L2 reads:": cache.next.reads,
             "h. number of L2 read misses:": cache.next.read_miss,
