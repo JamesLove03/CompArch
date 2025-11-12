@@ -44,7 +44,7 @@ def print_results(cache):
     total_traffic = cache.read_miss + cache.write_miss + cache.writeback
     
     if hasattr(cache, "next"): #if L2 exists append these values and update total_traffic
-        cache.next.miss_rate = round((cache.next.read_miss +cache.next.write_miss) / (cache.next.reads + cache.next.writes), 6)
+        cache.next.miss_rate = round((cache.next.CPU_miss) / (cache.next.CPU_miss + cache.next.CPU_hit), 6)
         results.update({
             "g. number of L2 reads:": cache.next.reads,
             "h. number of L2 read misses:": cache.next.read_miss,
