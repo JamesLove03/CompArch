@@ -24,25 +24,32 @@ class RepPolicy:
                 cache_set[i] = (block, False)
 
 
-    def update(self, new, index): #update the tracker and returns the block to be written to
-        output = None
-        cache_set = self.cache[index]
+    def update(self, new, index, exists): #update the tracker and returns the block to be written to
+        output = None                               # if the item exists and we are just updating exists = 1 
+        cache_set = self.cache[index]               #else if we are adding a new item we pass the way
 
-        for i, (block, valid) in enumerate(cache_set):
-            if not valid:
-                cache_set[i] = (new, True)
-                return block
-        
+        if not exists:
+            for i, (block, valid, way_idx) in enumerate(cache_set):
+                if not valid:
+                    cache_set[i] = (new, True, i)
+                    return i
+            
         if self.policy == 0: #LRU Logic
 
-            for i, (block, valid) in enumerate(cache_set):
+            for i, (block, valid, way_idx) in enumerate(cache_set):
                 if block == new:
-                    cache_set.remove((block, valid))
-                    cache_set.append((new, True))
-                    return None
+                    cache_set.remove((block, valid, way_idx))
+                    cache_set.append((new, True, way_idx))
+                    return None #return none because we don't need the way_idx in this case
             if len(cache_set) >= self.size:
-                output, _ = cache_set.popleft()
-            cache_set.append((new, True))
+                output, _ , way_idx= cache_set.popleft()
+            else: #adding a block when cache is not full
+                for i, item in enumerate(cache_set):
+                    if item == None:
+                        cache_set.append((new, True, i))
+
+            cache_set.append((new, True, way_idx))
+            return way_idx #tell the main code which index to place at / which index to remove
         
         elif self.policy == 1: #FIFO Logic
             if len(cache_set) >= self.size:

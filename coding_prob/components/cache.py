@@ -12,7 +12,7 @@ class Cache:
         
         sets = int(size/(assoc * blocksize))
 
-        self.cache = [deque(maxlen=int(assoc)) for _ in range(sets)]
+        self.cache = [[None] * int(assoc) for _ in range(sets)]
 
         self.rep_pol = RepPolicy(Replacement, assoc, sets)
         self.blocksize = blocksize
@@ -46,6 +46,8 @@ class Cache:
 
         for entry in cache_set:
             # Skip invalid blocks
+            if entry is None:
+                continue
             block, valid = entry[0], entry[1]
             if valid and block.rstrip(" D").lower() == tag.lower():
                 return True
@@ -72,26 +74,11 @@ class Cache:
 
     def evict(self, index, tag): #This block will find a block to evict or NONE and remove it so there is space in the queue
 
-        cache_set = self.cache[index]
-        evicted = self.rep_pol.update(tag, index)
+        evicted = self.rep_pol.update(tag, index, 0)
 
         self.log(f"{self.name} update replacement")
 
-        if evicted is None: #there is space return none
-            self.log(f"{self.name} victim: tag {evicted}, index {index}")
-            return None
-        else: # need to clear up space returns the item to be removed/written back
-            found = None  
-
-            for i, (block, valid, addr) in enumerate(cache_set): #find the block that needs to be removed
-
-                if block.rstrip(" D") == evicted: #found matching block
-                    found = block, valid, addr
-            
-            self.log(f"{self.name} victim: tag {found[0]}, index {index}")
-            if found:
-                cache_set.remove(found)
-            return found
+        return evicted
             
     def mark_dirty(self, tag, index):
         for i, (block, valid, addr) in enumerate(self.cache[index]):
@@ -100,16 +87,14 @@ class Cache:
                     self.cache[index][i] = (f"{block} D", valid, addr)
                     break
 
-    def add(self, index, tag, dirty, full_addr):
+    def add(self, index, tag, dirty, full_addr, way):
         cache_set = self.cache[index]
-
         output = tag
 
         if dirty:
             output = output + " D"
         
-        cache_set.append((output, 1, full_addr))
-
+        cache_set[way] = ((output, 1, full_addr))
 
     
     def read(self, full_addr, Count = True): #returns true on a hit and false on a miss
@@ -127,7 +112,7 @@ class Cache:
             self.log(f"{self.name} hit")
 
             if self.rep_pol.policy == 0: #if LRU update #if FIFO dont update
-                self.rep_pol.update(tag, index)
+                self.rep_pol.update(tag, index, 1)
                 self.log("Update LRU")
 
         else: #miss
@@ -137,14 +122,16 @@ class Cache:
             self.read_miss += 1
 
             #find block to evict or none
-            evicted_full = self.evict(index, tag)
-                            
-            if evicted_full is None: #there is free space simply place the block
-                self.add(index, tag, 0, full_addr) # add new block to cache
-            else:
-                evicted_addr = evicted_full[2]
+            evicted_way = self.evict(index, tag)
 
-                if evicted_full[0].endswith(" D"): #deal with writing back the dirty bit
+            evicted = self.cache[index][evicted_way] #gets the item to be evicted
+                            
+            if evicted is None: #there is free space simply place the block
+                self.add(index, tag, 0, full_addr, evicted_way) # add new block to cache
+            else:
+                evicted_addr = evicted[2]
+
+                if evicted[0].endswith(" D"): #deal with writing back the dirty bit
                     self.writeback += 1
                     if hasattr(self, "next"):
                         self.next.write(evicted_addr, False)
@@ -156,12 +143,12 @@ class Cache:
                             if block.rstrip(" D") == ptag and valid:
                                 self.prev.cache[pindex][i] = (block, False, addr) #invalidate the block in L1
                 
-                self.add(index, tag, 0, full_addr)
+                self.add(index, tag, 0, full_addr, evicted_way)
             
             if hasattr(self, "next"): #read the next cache if it exists
                 self.next.read(full_addr)                
 
-            self.rep_pol.update(tag, index)
+            self.rep_pol.update(tag, index, 0)
 
 
 
@@ -181,7 +168,7 @@ class Cache:
             self.mark_dirty(tag, index)
 
             if self.rep_pol.policy == 0:
-                self.rep_pol.update(tag, index)
+                self.rep_pol.update(tag, index, 1)
                 self.log("Update LRU")
 
         else:
@@ -190,10 +177,12 @@ class Cache:
                 self.CPU_miss    
             self.write_miss += 1
 
-            evicted_full = self.evict(index, tag) # find block to be evicted
+            evicted_way = self.evict(index, tag) # find block to be evicted
+
+            evicted_full = self.cache[index][evicted_way]
 
             if evicted_full is None: #there is free space simply place the block
-                self.add(index, tag, 1, full_addr)
+                self.add(index, tag, 1, full_addr, evicted_way)
             else: #someone is getting evicted
                 evicted_addr = evicted_full[2]
                 
@@ -209,13 +198,13 @@ class Cache:
                             if block.rstrip(" D") == ptag and valid:
                                 self.prev.cache[pindex][i] = (block, False, addr) #invalidate the block in L1
 
-                self.add(index, tag, 1, full_addr)
+                self.add(index, tag, 1, full_addr, evicted_way)
             
             if hasattr(self, "next"):
                 self.next.read(full_addr)
 
 
-            self.rep_pol.update(tag, index)
+            self.rep_pol.update(tag, index, 0)
 
 
     def print(self):
