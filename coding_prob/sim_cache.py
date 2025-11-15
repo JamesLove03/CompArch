@@ -1,6 +1,5 @@
 import argparse
 from components.cache import Cache
-from components.replacement_policy import RepPolicy
 import pdb
 
 
@@ -32,28 +31,28 @@ def run_test(cache, file):
 def print_results(cache):
 
     print("===== Simulation results (raw) =====")
-    cache.miss_rate = round((cache.read_miss +cache.write_miss) / (cache.reads + cache.writes), 6)
+    cache.miss_rate = (cache.read_miss +cache.write_miss) / (cache.reads + cache.writes)
     results = {
         "a. number of L1 reads:": cache.reads,
         "b. number of L1 read misses:": cache.read_miss,
         "c. number of L1 writes:": cache.writes,
         "d. number of L1 write misses:": cache.write_miss,
-        "e. L1 miss rate:": cache.miss_rate,
+        "e. L1 miss rate:": f"{cache.miss_rate:.6f}",
         "f. number of L1 writebacks:": cache.writeback,
     }
     total_traffic = cache.read_miss + cache.write_miss + cache.writeback
     
     if hasattr(cache, "next"): #if L2 exists append these values and update total_traffic
-        cache.next.miss_rate = round((cache.next.CPU_miss) / (cache.next.CPU_miss + cache.next.CPU_hit), 6)
+        cache.next.miss_rate = (cache.next.CPU_miss) / (cache.next.CPU_miss + cache.next.CPU_hit)
         results.update({
             "g. number of L2 reads:": cache.next.reads,
             "h. number of L2 read misses:": cache.next.read_miss,
             "i. number of L2 writes:": cache.next.writes,
             "j. number of L2 write misses:": cache.next.write_miss,
-            "k. L2 miss rate:": cache.next.miss_rate,
+            "k. L2 miss rate:": f"{cache.next.miss_rate:.6f}",
             "l. number of L2 writebacks:": cache.next.writeback,
             })
-        total_traffic = cache.next.read_miss + cache.next.write_miss + cache.next.writeback
+        total_traffic = cache.next.read_miss + cache.next.write_miss + cache.next.writeback + cache.next.silent_wb
     else: #if L2 does not exist append 0s
         results.update({
             "g. number of L2 reads:": 0,
@@ -94,16 +93,24 @@ if __name__ == "__main__":
         L1cache.update_next(L2cache)
         L2cache.prev = L1cache
         L1cache.prev = None
+    if args.Replacement_Policy == 1:
+        repl = "FIFO"
+    else:
+        repl = "LRU"
+    if args.Inclusion_Property == 1:
+        incl = "inclusive"
+    else:
+        incl = "non-inclusive"
 
     print("===== Simulator configuration =====")
-    print(f"{'BLOCKSIZE:':<22}{args.blocksize}")
-    print(f"{'L1_SIZE:':<22}{args.L1size}")
-    print(f"{'L1_ASSOC:':<22}{args.L1assoc}")
-    print(f"{'L2_SIZE:':<22}{args.L2size}")
-    print(f"{'L2_ASSOC:':<22}{args.L2assoc}")
-    print(f"{'REPLACEMENT POLICY:':<22}{args.Replacement_Policy}")
-    print(f"{'INCLUSION PROPERTY:':<22}{args.Inclusion_Property}")
-    print(f"{'trace_file:':<22}{args.trace_file}")
+    print(f"{'BLOCKSIZE:':<23}{args.blocksize}")
+    print(f"{'L1_SIZE:':<23}{args.L1size}")
+    print(f"{'L1_ASSOC:':<23}{args.L1assoc}")
+    print(f"{'L2_SIZE:':<23}{args.L2size}")
+    print(f"{'L2_ASSOC:':<23}{args.L2assoc}")
+    print(f"{'REPLACEMENT POLICY:':<23}{repl}")
+    print(f"{'INCLUSION PROPERTY:':<23}{incl}")
+    print(f"{'trace_file:':<23}{args.trace_file}")
 
     run_test(L1cache, args.trace_file)
     

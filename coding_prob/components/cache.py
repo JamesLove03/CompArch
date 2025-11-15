@@ -1,5 +1,4 @@
 import pdb
-from .replacement_policy import RepPolicy
 from collections import deque
 import math
 from typing import Union, Dict
@@ -12,15 +11,16 @@ class Cache:
         
         sets = int(size/(assoc * blocksize))
 
-        self.cache = [[None] * int(assoc) for _ in range(sets)]
+        self.cache = [[None] * int(assoc) for _ in range(sets)] #holds (tag, valid (True/False), full_address, number(for tracking the replacement))
 
-        self.rep_pol = RepPolicy(Replacement, assoc, sets)
         self.blocksize = blocksize
         self.size = size
         self.assoc = assoc
         self.inclusion = Inclusion
         self.sets = sets
         self.name = name
+        self.MAX = assoc - 1
+        self.replacement = Replacement
 
         self.reads = 0
         self.read_miss = 0
@@ -30,6 +30,7 @@ class Cache:
         self.writeback = 0
         self.CPU_miss = 0
         self.CPU_hit = 0
+        self.silent_wb = 0
 
     def log(self, message):
 
@@ -39,22 +40,9 @@ class Cache:
 
     def update_next(self, cache):
         self.next = cache
-
-
-    def check_exist(self, tag, index):  # returns True if a valid block exists
-        cache_set = self.cache[index]
-
-        for entry in cache_set:
-            # Skip invalid blocks
-            if entry is None:
-                continue
-            block, valid = entry[0], entry[1]
-            if valid and block.rstrip(" D").lower() == tag.lower():
-                return True
-        return False
     
 
-    def cut_addr(self, addr):
+    def cut_addr(self, addr): # cuts the address into the four components
 
         address = int(addr, 16)
 
@@ -72,29 +60,118 @@ class Cache:
         return offset, index, hex(tag)[2:]
 
 
-    def evict(self, index, tag): #This block will find a block to evict or NONE and remove it so there is space in the queue
-
-        evicted = self.rep_pol.update(tag, index, 0)
-
-        self.log(f"{self.name} update replacement")
-
-        return evicted
-            
-    def mark_dirty(self, tag, index):
-        for i, (block, valid, addr) in enumerate(self.cache[index]):
-            if block.rstrip(" D") == tag and valid:
-                if not block.endswith(" D"):
-                    self.cache[index][i] = (f"{block} D", valid, addr)
-                    break
-
-    def add(self, index, tag, dirty, full_addr, way):
+    def find_index_by_tag(self, tag, index): # searches for an item and returns the index in the set it is at
         cache_set = self.cache[index]
-        output = tag
+        for i, item in enumerate(cache_set):
+            if item is None:
+                continue
+            elif item[1] == False:
+                continue
+            elif item[0].rstrip(" D") == tag:
+                return i
+        return None
+
+
+    def evict(self, index): #This block will find a block to evict or the earliest free block and return the index of that block
+        cache_set = self.cache[index]
+        output = None
+        #search first for free blocks 
+        for i, item in enumerate(cache_set):
+            if item is None:
+                return i
+
+        #then invalid blocks
+        for i, item in enumerate(cache_set):
+            if item[1] is False:
+                return i
+            
+        #then the last counterblock
+        for i, item in enumerate(cache_set):
+            if item[3] >= self.MAX:
+                output = i
+
+        block = self.cache[index][output]
+
+        if self.name == "L2" and self.inclusion == 1: # Could be looking at removing from L1
+            poffset, pindex, ptag = self.prev.cut_addr(block[2]) #cut the addr to L1 standards
+            pidx = self.prev.find_index_by_tag(ptag, pindex)
+            if pidx is not None and self.prev.cache[pindex][pidx][1] == True: #the item does exist in L1 we need to invalidate it
+                self.prev.mark_invalid(ptag, pindex)
+                self.log(f"Invalidated a block in L1 {ptag}, {pindex}")
+                full_tag = self.prev.cache[pindex][pidx][0]
+                if (" D") in full_tag:
+                    self.silent_wb += 1
+
+        return output
+
+        
+            
+    def mark_dirty(self, tag, index): # marks an existing item as dirty
+        
+        idx = self.find_index_by_tag(tag, index)
+
+        tag, valid, address, number = self.cache[index][idx]
+        
+        if not tag.endswith(" D"):
+            tag += " D"
+        
+        self.cache[index][idx] = (tag, valid, address, number)
+
+
+    def mark_invalid(self, tag, index): # marks an existing item as invalid
+
+        idx = self.find_index_by_tag(tag, index)
+
+        tag, valid, address, number = self.cache[index][idx]
+        
+        
+        self.cache[index][idx] = (tag, False, address, number)
+
+
+    def update_trackers(self, index):
+        cache_set = self.cache[index]
+
+        for i, item in enumerate(cache_set):
+            if item is None:
+                continue
+            tag, valid, address, number = item
+            cache_set[i] = (tag, valid, address, number + 1)
+
+
+    def update_specific(self, idx, index):
+    
+        cache_set = self.cache[index]
+        
+        tag, valid, addr, number = cache_set[idx]
+
+        if number == 0:
+            return
+        
+        old_num = number
+
+        for i, item in enumerate(cache_set):
+            if item is None:
+                continue
+            tag, valid, addr, number = item
+
+            if i == idx:
+                number = 0
+            elif number < old_num:
+                number += 1
+
+            cache_set[i] = (tag, valid, addr, number)
+
+    
+    def add(self, idx, tag, index, dirty, addr): # adds an item to a given idx overwriting the old item. Adds new items as -1 before incrementing all counters
+        
+        cache_set = self.cache[index]
+
+        cache_set[idx] = (tag, True, addr, -1)
+
+        self.update_trackers(index)
 
         if dirty:
-            output = output + " D"
-        
-        cache_set[way] = ((output, 1, full_addr))
+            self.mark_dirty(tag, index)
 
     
     def read(self, full_addr, Count = True): #returns true on a hit and false on a miss
@@ -105,15 +182,17 @@ class Cache:
 
         self.log(f"{self.name} read : {hex(block_addr)} (tag {tag}, index {index})")
         #check_exist
-        if self.check_exist(tag, index): #hit
+
+        idx = self.find_index_by_tag(tag, index)
+        
+        if idx is not None: #hit
             if Count:
                 self.CPU_hit += 1
 
             self.log(f"{self.name} hit")
 
-            if self.rep_pol.policy == 0: #if LRU update #if FIFO dont update
-                self.rep_pol.update(tag, index, 1)
-                self.log("Update LRU")
+            if self.replacement == 0: #if LRU update #if FIFO dont update
+                self.update_specific(idx, index)
 
         else: #miss
             self.log(f"{self.name} miss")
@@ -121,90 +200,69 @@ class Cache:
                 self.CPU_miss += 1    
             self.read_miss += 1
 
-            #find block to evict or none
-            evicted_way = self.evict(index, tag)
+            evicted_idx = self.evict(index) # find block to evict or none
+            
+            evicted = self.cache[index][evicted_idx] # gets the item to be evicted
 
-            evicted = self.cache[index][evicted_way] #gets the item to be evicted
-                            
-            if evicted is None: #there is free space simply place the block
-                self.add(index, tag, 0, full_addr, evicted_way) # add new block to cache
-            else:
-                evicted_addr = evicted[2]
+            if evicted is not None and evicted[1] is True:
 
-                if evicted[0].endswith(" D"): #deal with writing back the dirty bit
+                if evicted[0].endswith(" D"):
                     self.writeback += 1
                     if hasattr(self, "next"):
-                        self.next.write(evicted_addr, False)
+                            self.next.write(evicted[2], False)
                 
-                if self.name == "L2" and self.inclusion == 1: #here we have inclusive and in L2
-                    poffset, pindex, ptag = self.prev.cut_addr(evicted_addr) #cut the addr to L1 standards
-                    if self.prev.check_exist(ptag, pindex): #the item does exist in L1 we need to invalidate it
-                        for i, (block, valid, addr) in enumerate(self.prev.cache[pindex]):
-                            if block.rstrip(" D") == ptag and valid:
-                                self.prev.cache[pindex][i] = (block, False, addr) #invalidate the block in L1
-                
-                self.add(index, tag, 0, full_addr, evicted_way)
+            self.add(evicted_idx, tag, index, 0, full_addr) # in all other cases simply add to the cache (Not Dirty on a Read)
             
-            if hasattr(self, "next"): #read the next cache if it exists
+            if hasattr(self, "next"): #Call L2 if necessary
                 self.next.read(full_addr)                
-
-            self.rep_pol.update(tag, index, 0)
-
 
 
     def write(self, full_addr, Count = True):
-        #cut up address
-        offset, index, tag = self.cut_addr(full_addr)
+
+        offset, index, tag = self.cut_addr(full_addr) # cut up address
+
         block_addr = int(full_addr, 16) - offset
 
         self.log(f"{self.name} write : {hex(block_addr)} (tag {tag}, index {index})")
         self.writes += 1
+        
         #check_exist
-        if self.check_exist(tag, index): # hit
+        idx = self.find_index_by_tag(tag, index)
+
+        if idx is not None: # hit
+
             self.log(f"{self.name} hit")
             if Count:
                 self.CPU_hit += 1
-            #add the dirty tag to this hit
-            self.mark_dirty(tag, index)
+            
+            self.mark_dirty(tag, index) #add the dirty tag to this hit
 
-            if self.rep_pol.policy == 0:
-                self.rep_pol.update(tag, index, 1)
-                self.log("Update LRU")
+            if self.replacement == 0: #update if LRU
+                self.update_specific(idx, index)
 
         else:
             self.log(f"{self.name} miss")
             if Count:
-                self.CPU_miss    
+                self.CPU_miss += 1
+     
             self.write_miss += 1
 
-            evicted_way = self.evict(index, tag) # find block to be evicted
+            evicted_idx = self.evict(index) # find block to be evicted
 
-            evicted_full = self.cache[index][evicted_way]
+            evicted = self.cache[index][evicted_idx]
 
-            if evicted_full is None: #there is free space simply place the block
-                self.add(index, tag, 1, full_addr, evicted_way)
-            else: #someone is getting evicted
-                evicted_addr = evicted_full[2]
-                
-                if evicted_full[0].endswith(" D"): #deal with writing back the dirty bit
+            if evicted is not None and evicted[1] is True: #there is free space simply place the block
+            
+                if evicted[0].endswith(" D"): #deal with writing back the dirty bit
                     self.writeback += 1
+                    
                     if hasattr(self, "next"):
-                        self.next.write(evicted_addr, False)
+                        self.next.write(evicted[2], False)
 
-                if self.name == "L2" and self.inclusion == 1: #here we have inclusive and in L2
-                    poffset, pindex, ptag = self.prev.cut_addr(evicted_addr) #cut the addr to L1 standards
-                    if self.prev.check_exist(ptag, pindex): #the item does exist in L1 we need to invalidate it
-                        for i, (block, valid, addr) in enumerate(self.prev.cache[pindex]):
-                            if block.rstrip(" D") == ptag and valid:
-                                self.prev.cache[pindex][i] = (block, False, addr) #invalidate the block in L1
-
-                self.add(index, tag, 1, full_addr, evicted_way)
+            self.add(evicted_idx, tag, index, 1, full_addr)
             
             if hasattr(self, "next"):
                 self.next.read(full_addr)
-
-
-            self.rep_pol.update(tag, index, 0)
 
 
     def print(self):
